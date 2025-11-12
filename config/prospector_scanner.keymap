@@ -91,6 +91,7 @@ glidepoint: &touch_sensor {};
         &zip_absolute_to_relative
         &zip_xy_transform (INPUT_TRANSFORM_XY_SWAP | INPUT_TRANSFORM_Y_INVERT)
         &zip_xy_scaler 4 1
+        &zip_y_scaler 3 2
         &zip_temp_layer 1 200
         &zip_mouse_gesture
     >;
