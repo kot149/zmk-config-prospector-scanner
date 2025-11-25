@@ -24,12 +24,16 @@
 ## 📋 Table of Contents
 
 1. [What is Prospector Scanner?](#what-is-prospector-scanner)
-2. [Touch Mode vs Non-Touch Mode](#touch-mode-vs-non-touch-mode)
-3. [Quick Start](#quick-start)
-4. [Hardware & Wiring](#hardware--wiring)
-5. [Configuration Guide](#configuration-guide)
-6. [Keyboard Integration](#keyboard-integration)
-7. [Documentation](#documentation)
+2. [Key Features](#-key-features)
+3. [Touch Mode vs Non-Touch Mode](#touch-mode-vs-non-touch-mode)
+4. [Quick Start](#quick-start)
+5. [Hardware & Wiring](#hardware--wiring)
+6. [Configuration Guide](#configuration-guide)
+7. [Architecture Overview](#️-architecture-overview)
+8. [Protocol Specification](#-protocol-specification)
+9. [Display Features](#-display-features)
+10. [Keyboard Integration](#keyboard-integration)
+11. [Documentation](#documentation)
 
 ---
 
@@ -90,6 +94,45 @@ Both modes use the same hardware:
 - ✅ **Zero Connection Cost**: Uses BLE advertisements (observer mode)
 - ✅ **Professional UI**: YADS-style widget layout with NerdFont icons
 - ✅ **Split Keyboard Support**: Shows both left/right side information
+
+## 🎯 Key Features
+
+### 📱 **YADS-Style Professional UI**
+- **Multi-Widget Display**: Connection status, layer indicators, modifier keys, WPM tracking, battery visualization, and signal strength
+- **Split Keyboard Support**: Unified display showing both left and right side information with intelligent layout
+- **Color-Coded Status**: 5-level battery indicators (Green/Light Green/Yellow/Orange/Red), unique pastel layer colors
+- **Real-time Updates**: Instant response to keyboard state changes with sub-second latency
+- **WPM Tracking**: Real-time Words Per Minute calculation with intelligent decay during idle periods
+- **NerdFont Icons**: Professional modifier key indicators (󰘴 Ctrl, 󰘵 Shift, 󰘶 Alt,  GUI)
+
+### 🔋 **Smart Power Management** (v2.0 Enhanced)
+- **Activity-Based Intervals**: 10Hz (100ms) when typing, 0.03Hz (30s) when idle for maximum battery efficiency
+- **Automatic Transitions**: Seamless switching between active/idle states with configurable timeouts
+- **WPM-Aware Updates**: Higher frequency during active typing sessions with decay algorithm
+- **Scanner Battery Support**: Real-time battery monitoring for scanner device with charging indicator
+- **Timeout Dimming**: Automatic brightness reduction to 5% after configurable inactivity (v2.0)
+- **USB/Battery Profiles**: Different brightness and power settings for USB vs battery operation
+
+### 🎮 **Universal Compatibility**
+- **Any ZMK Keyboard**: Works with split, unibody, or any ZMK-compatible device
+- **Non-Intrusive**: Keyboards maintain full 5-device connectivity
+- **Multi-Keyboard**: Monitor up to 5 keyboards simultaneously with channel isolation
+- **No Pairing Required**: Uses BLE advertisements (observer mode) - no connection slot consumed
+
+### 🎯 **Touch Panel Support** (v2.0 New)
+- **Optional CST816S Touch**: Enable with `CONFIG_PROSPECTOR_TOUCH_ENABLED=y`
+- **4-Direction Swipe Gestures**: Navigate settings screens intuitively
+- **Display Settings Screen**: Adjust brightness, auto-brightness on/off via touch slider
+- **System Settings Screen**: Future expansion for advanced configuration
+- **Thread-Safe LVGL**: Complete freeze elimination with mutex protection
+- **Dynamic Memory**: Widgets created on-demand, destroyed when not needed
+
+### 🌞 **Adaptive Brightness** (v1.1+)
+- **APDS9960 Integration**: Ambient light sensor with 4-pin mode (no interrupt required)
+- **Smooth Transitions**: Configurable fade duration and steps (default: 800ms, 12 steps)
+- **Non-linear Response**: Intelligent mapping for comfortable viewing in all lighting conditions
+- **Auto/Manual Toggle**: Switch between sensor control and manual adjustment (touch mode)
+- **Activity-Based Dimming**: Automatic reduction to 5% when keyboards go idle (v2.0)
 
 ### What's New in v2.0?
 
@@ -558,6 +601,229 @@ Copy this template and customize for your needs.
 
 ---
 
+## 🏗️ Architecture Overview
+
+### System Design
+
+**Scanner Mode Design** (Independent Monitoring):
+- Keyboard → Multiple Devices (up to 5 via normal BLE connections)
+- Keyboard → Scanner (BLE Advertisement broadcast only - no connection)
+- Scanner operates independently without consuming connection slots
+
+### System Components
+
+```
+┌─────────────┐    BLE Adv     ┌──────────────┐
+│   Keyboard  │ ──────────────→│   Scanner    │
+│             │    26-byte     │   Display    │
+│ (10Hz/0.03Hz)│   Protocol    │  (USB/Battery)│
+└─────────────┘                └──────────────┘
+       │
+       ├── Device 1 (PC)
+       ├── Device 2 (Tablet)
+       ├── Device 3 (Phone)
+       ├── Device 4 (...)
+       └── Device 5 (...)
+```
+
+**Key Points**:
+- Keyboard broadcasts status via BLE Advertisement (observer mode)
+- Scanner only **listens** - does NOT connect to keyboard
+- Keyboard maintains full 5-device connectivity
+- Scanner can be powered via USB or battery (optional)
+
+### Communication Flow
+
+```
+Keyboard                           Scanner
+────────                          ────────
+[Keypress detected]
+    │
+    ├─→ Update internal state
+    │   (layer, modifiers, WPM)
+    │
+    ├─→ Package into 26-byte
+    │   advertisement payload
+    │
+    └─→ Broadcast BLE Adv ─────→  [BLE Observer Mode]
+        (100ms interval when           │
+         typing, 30s when idle)        ├─→ Parse advertisement
+                                       │   (battery, layer, etc.)
+                                       │
+                                       ├─→ Update LVGL widgets
+                                       │   (battery bars, layer
+                                       │    indicators, WPM, etc.)
+                                       │
+                                       └─→ Display to screen
+                                           (YADS-style UI)
+```
+
+---
+
+## 📊 Protocol Specification
+
+### BLE Advertisement Format (26 bytes)
+
+The keyboard broadcasts its status using a custom BLE Advertisement payload. Scanner receives this in observer mode (no connection needed).
+
+| Offset | Field | Size | Description | Example |
+|--------|-------|------|-------------|---------|
+| 0-1 | Manufacturer ID | 2 bytes | `0xFF 0xFF` (Custom/Local use) | `FF FF` |
+| 2-3 | Service UUID | 2 bytes | `0xAB 0xCD` (Prospector Protocol ID) | `AB CD` |
+| 4 | Protocol Version | 1 byte | Protocol version (current: `0x01`) | `01` |
+| 5 | Battery Level | 1 byte | Main battery 0-100% (Central for split) | `5A` (90%) |
+| 6 | Active Layer | 1 byte | Current layer 0-15 | `02` (Layer 2) |
+| 7 | Profile Slot | 1 byte | BLE profile 0-4 | `01` (Profile 1) |
+| 8 | Connection Count | 1 byte | Number of connected BLE devices 0-5 | `03` (3 devices) |
+| 9 | Status Flags | 1 byte | USB/BLE/Charging/Caps Lock bits | `05` (USB+Caps) |
+| 10 | Device Role | 1 byte | `0`=Standalone, `1`=Central, `2`=Peripheral | `01` (Central) |
+| 11 | Device Index | 1 byte | Split keyboard index (0=left, 1=right) | `00` |
+| 12-14 | Peripheral Batteries | 3 bytes | Left/Right/Aux battery levels 0-100% | `52 00 00` (82%, none, none) |
+| 15-18 | Layer Name | 4 bytes | ASCII layer identifier (optional) | `4C30...` ("L0") |
+| 19-22 | Keyboard ID | 4 bytes | Hash of keyboard name for multi-device | `12345678` |
+| 23 | Modifier Flags | 1 byte | L/R Ctrl,Shift,Alt,GUI states | `05` (LCtrl+LShift) |
+| 24 | WPM Value | 1 byte | Words per minute 0-255 | `3C` (60 WPM) |
+| 25 | Reserved | 1 byte | Future expansion | `00` |
+
+### Status Flags (Offset 9)
+
+```
+Bit 7 6 5 4 3 2 1 0
+    │ │ │ │ │ │ │ └─ USB Connected (1=yes, 0=no)
+    │ │ │ │ │ │ └─── BLE Active (1=yes, 0=no)
+    │ │ │ │ │ └───── Charging (1=yes, 0=no)
+    │ │ │ │ └─────── Caps Lock (1=on, 0=off)
+    │ │ │ └───────── Reserved
+    │ │ └─────────── Reserved
+    │ └───────────── Reserved
+    └─────────────── Reserved
+```
+
+### Modifier Flags (Offset 23)
+
+```
+Bit 7 6 5 4 3 2 1 0
+    │ │ │ │ │ │ │ └─ Left Ctrl
+    │ │ │ │ │ │ └─── Left Shift
+    │ │ │ │ │ └───── Left Alt
+    │ │ │ │ └─────── Left GUI (Win/Cmd)
+    │ │ │ └───────── Right Ctrl
+    │ │ └─────────── Right Shift
+    │ └───────────── Right Alt
+    └─────────────── Right GUI
+```
+
+### Broadcast Intervals
+
+The keyboard adjusts broadcast frequency based on activity to save battery:
+
+- **Active Mode** (typing detected): 100ms interval (10 Hz)
+  - Triggered by any keypress
+  - Provides real-time WPM and layer updates
+
+- **Idle Mode** (no typing): 30000ms interval (0.03 Hz)
+  - Activated after 10 seconds of no keypresses
+  - Battery-friendly for long idle periods
+  - Still broadcasts status for monitoring
+
+---
+
+## 🎨 Display Features
+
+### Widget Layout (v2.0)
+
+```
+┌─────────────────────────────┐
+│ MyKeyboard            🔋 85%│ ← Device name (left), Scanner battery (right, v1.1+)
+│ > USB                 [P0] │ ← Connection status (left: > USB or BLE icon, right: profile)
+│                             │
+│ WPM                    RX   │ ← WPM (left), Signal info (right)
+│ 045             -45dBm 1.0Hz│   (RSSI + reception rate)
+│                             │
+│          Layer              │ ← Layer title
+│    0  1  2  3  4  5  6      │ ← Pastel colored layer indicators (0-15 supported)
+│                             │
+│        󰘴  󰘶  󰘵              │ ← Modifier key indicators (NerdFont icons)
+│                             │   󰘴=Ctrl, 󰘵=Shift, 󰘶=Alt, =GUI
+│                             │
+│    ████████████ 85%         │ ← Keyboard battery (main/central)
+│    ████████████ 78%         │ ← Split keyboard peripheral battery (if applicable)
+└─────────────────────────────┘
+```
+
+### Visual Elements
+
+#### Battery Color Coding (5-Level System)
+
+Battery bars use color-coded indicators for quick status recognition:
+
+| Range | Color | Hex Code | Visual |
+|-------|-------|----------|--------|
+| **80-100%** | Green | `#00CC66` | 🟢 Full/Healthy |
+| **60-79%** | Light Green | `#66CC00` | 🟢 Good |
+| **40-59%** | Yellow | `#FFCC00` | 🟡 Medium |
+| **20-39%** | Orange | `#FF9900` | 🟠 Low |
+| **0-19%** | Red | `#FF3333` | 🔴 Critical |
+
+#### Layer Display
+
+- **Pastel Colors**: 7-15 unique pastel colors for different layers
+- **Configurable Count**: Adjust max layers via `CONFIG_PROSPECTOR_MAX_LAYERS` (default: 7)
+- **Dynamic Centering**: Automatically adjusts spacing based on layer count
+  - 4 layers = wide spacing
+  - 10 layers = tight fit
+  - Always perfectly centered
+- **Active Indicator**: Current layer highlighted with brighter color
+
+#### Connection Status
+
+- **USB Mode**: Shows "> USB" text (v2.0 fix for Issue #5)
+- **BLE Mode**: Shows Bluetooth icon
+- **Profile**: Displays active BLE profile `[P0]` - `[P4]`
+
+#### WPM Display (Words Per Minute)
+
+- **Real-time Calculation**: Updates during typing with decay algorithm
+- **3-Digit Format**: `000` - `255` WPM
+- **Idle Decay**: Gradually decreases when typing stops
+- **Window**: Configurable (10s/30s/60s) via `CONFIG_ZMK_STATUS_ADV_WPM_WINDOW_SECONDS`
+
+#### Signal Status (Bottom Right)
+
+- **RSSI**: Signal strength in dBm (e.g., `-45dBm` = excellent, `-80dBm` = weak)
+- **Reception Rate**: Update frequency in Hz (e.g., `10Hz` = active typing, `0.03Hz` = idle)
+
+#### Scanner Battery (Top Right, v1.1+)
+
+- **Display**: Shows scanner's own battery level `🔋 85%`
+- **Charging Indicator**: Icon changes when USB charging
+- **Optional**: Only shown when `CONFIG_PROSPECTOR_BATTERY_SUPPORT=y`
+
+### Display Brightness (v2.0)
+
+#### Auto-Brightness (APDS9960 Sensor)
+
+- **Sensor**: APDS9960 ambient light sensor (4-pin mode, no interrupt)
+- **Non-linear Response**: Maps sensor values to comfortable brightness levels
+- **Smooth Transitions**: Configurable fade (default: 800ms, 12 steps)
+- **USB/Battery Profiles**: Different max brightness for each power source
+- **Activity-Based Dimming**: Auto-dim to 5% after timeout (configurable)
+
+#### Manual Brightness (Touch Mode)
+
+- **Swipe Gesture**: Swipe DOWN to access Display Settings
+- **Slider Control**: Adjust brightness 0-100% via touch slider
+- **Persistent**: Settings saved to flash memory
+- **Auto-Brightness Toggle**: Enable/disable sensor control on-device
+
+#### Timeout Dimming (v2.0)
+
+- **Automatic**: Dims to 5% when no keyboard activity detected
+- **Configurable Timeout**: Set via `CONFIG_PROSPECTOR_SCANNER_TIMEOUT_MS` (default: 8 minutes)
+- **Wake on Activity**: Returns to normal brightness when keyboard activity resumes
+
+---
+
 ## Keyboard Integration
 
 Your ZMK keyboard needs to broadcast status via BLE Advertisement.
@@ -625,19 +891,6 @@ west build -b your_board -- -DSHIELD=your_shield
 2. Power on scanner
 3. Scanner should detect keyboard within 1-2 seconds
 4. Device name should match `CONFIG_ZMK_STATUS_ADV_KEYBOARD_NAME`
-
-### What Gets Broadcast
-
-The status advertisement (26 bytes) includes:
-- Battery level (0-100%)
-- Active layer (0-15)
-- BLE profile (0-4)
-- Connection status (USB/BLE)
-- Modifier states (Ctrl/Alt/Shift/GUI)
-- Keyboard role (central/peripheral for split)
-- WPM (words per minute)
-
-Scanner receives this data every 100ms (active) or 30s (idle) and updates display.
 
 ---
 
