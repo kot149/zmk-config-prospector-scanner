@@ -17,7 +17,7 @@ manifest:
       import: app/west.yml
     - name: prospector-zmk-module
       remote: prospector
-      revision: feature/v2.0-scanner-touch
-      path: modules/prospector-zmk-module
+      revision: v2.0.0
+      path: modules/prospector-zmk-module-ogu
   self:
     path: config
